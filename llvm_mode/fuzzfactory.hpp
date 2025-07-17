@@ -25,6 +25,9 @@ namespace fuzzfactory {
 
 using namespace llvm;
 
+/** Hacky struct to get name of template type parameter X */
+template<typename X> struct TypeName;
+
 /** Instrumentation pass for a fuzzing domain */
 template<class D>
 class RegisterDomain : public ModulePass {
@@ -46,7 +49,11 @@ public:
     /* Runs this instrumentation pass on a module */
     bool runOnModule(Module &M) override {
         D instrumentor(M);
+#if LLVM_VERSION_MAJOR >= 11
+        instrumentor.setRNG(M.createRNG(TypeName<D>::name));
+#else
         instrumentor.setRNG(M.createRNG(this));
+#endif
         instrumentor.visit(M);
         instrumentor.done();
         return true;
@@ -55,9 +62,6 @@ public:
 
 template<class D>
 char RegisterDomain<D>::ID = 0; // This silly char is required by LLVM, which remembers its address (ugh)
-
-/** Hacky struct to get name of template type parameter X */
-template<typename X> struct TypeName;
 
 /** Base class for domain-specific fuzzing instrumentation */
 template<class V>
@@ -154,32 +158,28 @@ protected:
         }
     }
 
-    IRBuilder<> insert_before(BasicBlock& bb) {
+    std::unique_ptr<llvm::IRBuilder<>> insert_before(BasicBlock& bb) {
         // Preprend to basic block
         BasicBlock::iterator ip = bb.getFirstInsertionPt();
-        IRBuilder<> irb(&bb, ip);
         NumInstrumentationPoints++;
-        return irb;
+        return std::make_unique<IRBuilder<>>(&bb, ip);
     }
 
-    IRBuilder<> insert_after(BasicBlock& bb){
+    std::unique_ptr<llvm::IRBuilder<>> insert_after(BasicBlock& bb){
         // Append to basic block
-        IRBuilder<> irb(&bb);
         NumInstrumentationPoints++;
-        return irb;
+        return std::make_unique<IRBuilder<>>(&bb);
     }
 
 
-    IRBuilder<> insert_before(Instruction& inst) {
-        IRBuilder<> irb(&inst);
+    std::unique_ptr<llvm::IRBuilder<>> insert_before(Instruction& inst) {
         NumInstrumentationPoints++;
-        return irb;
+        return std::make_unique<IRBuilder<>>(&inst);
     }
 
-    IRBuilder<> insert_after(Instruction& inst){
-        IRBuilder<> irb(inst.getNextNode());
+    std::unique_ptr<llvm::IRBuilder<>> insert_after(Instruction& inst){
         NumInstrumentationPoints++;
-        return irb;
+        return std::make_unique<IRBuilder<>>(inst.getNextNode());
     }
 
     Value* loadDsfMapVariable(IRBuilder<> irb) {
